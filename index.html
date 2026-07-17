@@ -21,6 +21,9 @@
   .row{display:flex;gap:12px;align-items:center;margin-top:12px}
   #btn{flex:1;font-size:16px;padding:12px;border-radius:8px;border:none;background:#d85a30;color:#fff;font-weight:600;cursor:pointer}
   #btn:active{transform:scale(0.98)}
+  #shareBtn{flex:1;font-size:15px;padding:10px;border-radius:8px;border:none;background:#2e7d5e;color:#fff;font-weight:600;cursor:pointer}
+  #shareBtn:active{transform:scale(0.98)}
+  #stats{font-size:12px;color:#8a8f98;margin-top:8px;line-height:1.6}
   .judge{min-width:250px}
   .judge .lbl{font-size:12px;color:#8a8f98}
   .judge .msg{font-size:15px;font-weight:600;min-height:24px}
@@ -49,6 +52,10 @@
       <div class="msg" id="judge">──</div>
     </div>
   </div>
+  <div class="row" id="shareRow" style="display:none">
+    <button id="shareBtn">📋 記録を自慢する</button>
+  </div>
+  <div id="stats"></div>
   <div class="help">
     ① 重力を選んでスタート → 大車輪加速(粘るほど高難度)<br>
     ② ボタンか<b>画面タップ</b>(PCはスペースキー)で離手 → 空中で<b>左右スワイプ</b>(PCは←→キー)でひねり!1回+0.5点・最大5回<br>
@@ -60,6 +67,7 @@
 const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 const btn=document.getElementById('btn'),judge=document.getElementById('judge');
 const dEl=document.getElementById('dscore'),eEl=document.getElementById('escore'),tEl=document.getElementById('total'),bestEl=document.getElementById('best');
+const shareRow=document.getElementById('shareRow'),shareBtn=document.getElementById('shareBtn'),statsEl=document.getElementById('stats');
 const W=672,H=380,barX=170,barY=110,armL=48,groundY=330;
 const GRAV={earth:{g:0.26,dMul:2.2,name:'地球'},moon:{g:0.045,dMul:0.6,name:'月'},jupiter:{g:0.65,dMul:3.5,name:'木星'}};
 const STAMINA_LIM=100*Math.PI*2; // 腹筋の限界:累計100回転で回転が鈍る(実質、月専用の制限)
@@ -73,6 +81,26 @@ let roofBroken=false,holeX=0,debris=[],matMiss=false,staminaOut=false;
 const fg='#e8e6e0',mut='#8a8f98',accent='#f0997b',teal='#5dcaa5',mat='#3a4a5a';
 for(let i=0;i<80;i++)stars.push({x:Math.random()*W,y:-Math.random()*4000-300,r:Math.random()*1.6+0.4});
 
+// ===== 記録の永続化(localStorage) =====
+const STORE_KEY='tetsubo_records_v1';
+let rec={best:{earth:0,moon:0,jupiter:0},bestTotal:0,bestWaza:null,plays:0,roofBreaks:0};
+try{const s=localStorage.getItem(STORE_KEY);if(s){const j=JSON.parse(s);rec=Object.assign(rec,j);rec.best=Object.assign({earth:0,moon:0,jupiter:0},j.best||{});}}catch(e){}
+function saveRec(){try{localStorage.setItem(STORE_KEY,JSON.stringify(rec));}catch(e){}}
+const BASE_LABEL={earth:'標準重力 / D×2.2',moon:'重力1/6 滞空天国 / D×0.6',jupiter:'重力2.5倍 地獄 / D×3.5'};
+function updateStats(){
+  const yen=rec.roofBreaks*50000; // 修理費0.5点=5万円換算のギャグ
+  statsEl.textContent='通算 '+rec.plays+'回'
+    +(rec.bestWaza?' / 最高技: '+rec.bestWaza.name+' ['+rec.bestWaza.rank+']':'')
+    +(rec.roofBreaks>0?' / 🏚 天井修理費 累計請求額 ¥'+yen.toLocaleString()+'('+rec.roofBreaks+'回分)※体育館事務局より':'');
+  document.querySelectorAll('.gbtn').forEach(b=>{
+    const g=b.dataset.g,bv=rec.best[g]||0;
+    b.querySelector('small').textContent=BASE_LABEL[g]+(bv>0?' / ベスト'+bv.toFixed(1):'');
+  });
+}
+best=rec.bestTotal||0;
+bestEl.textContent=best.toFixed(1);
+updateStats();
+
 document.querySelectorAll('.gbtn').forEach(b=>b.addEventListener('click',()=>{
   if(mode==='swing'||mode==='air')return;
   gMode=b.dataset.g;
@@ -84,6 +112,7 @@ function reset(){
   roofBroken=false;debris=[];matMiss=false;staminaOut=false;
   twists=0;twistAnim=0;swipeActive=false;lastWaza=null;
   judge.textContent='──';dEl.textContent='-';eEl.textContent='-';tEl.textContent='-';
+  shareRow.style.display='none';
   btn.textContent='離手!(スペース可)';
 }
 function release(){
@@ -207,6 +236,16 @@ function land(){
   if(gMode==='moon'&&eS>=9.5)msg+=' ※月やけどな';
   judge.textContent=msg;
   if(tot>best){best=tot;bestEl.textContent=best.toFixed(1);}
+  // 記録更新(通算・惑星別・最高技・天井修理費)
+  rec.plays++;
+  if(roofBroken)rec.roofBreaks++;
+  if(tot>rec.best[gMode])rec.best[gMode]=tot;
+  if(tot>rec.bestTotal)rec.bestTotal=tot;
+  const wDiff=flips+twists*0.5;
+  if(lastWaza&&(!rec.bestWaza||wDiff>(rec.bestWaza.diff||0)))rec.bestWaza={name:lastWaza.name,rank:lastWaza.rank,diff:wDiff};
+  saveRec();updateStats();
+  shareRow.style.display='flex';
+  shareBtn.textContent='📋 記録を自慢する';
   btn.textContent='もう一回';
 }
 function step(){
@@ -420,6 +459,31 @@ function act(){
   else if(mode==='swing')release();
   else if(mode==='air')brace();
 }
+// ===== 記録の自慢(クリップボード) =====
+function fallbackCopy(t,done){
+  const ta=document.createElement('textarea');
+  ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  try{document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);done();
+}
+function copyText(t,done){
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,()=>fallbackCopy(t,done));
+  else fallbackCopy(t,done);
+}
+shareBtn.addEventListener('click',()=>{
+  if(mode!=='done')return;
+  const emoji={earth:'🌏',moon:'🌙',jupiter:'🪐'}[gMode];
+  const t='【鉄棒着地チャレンジ】'+emoji+GRAV[gMode].name+'で'+tot.toFixed(1)+'点!'
+    +(lastWaza?' 技:'+lastWaza.name+'['+lastWaza.rank+']':'')
+    +(roofBroken?' (天井は壊した)':'')
+    +' おまえも跳んでみ→ https://makenico.github.io/tetsubo-game-iphone/';
+  copyText(t,()=>{
+    shareBtn.textContent='✅ コピーしたで!SNSに貼り付けや';
+    setTimeout(()=>{shareBtn.textContent='📋 記録を自慢する';},2000);
+  });
+});
+
 btn.addEventListener('click',act);
 // スマホ:キャンバスタップでも操作OK(touchstartで即反応)
 // 滞空中の高空だけはスワイプ判定に切り替える(着地直前「今や!」はタップ即踏ん張りを維持)
