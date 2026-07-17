@@ -31,9 +31,9 @@
 <div class="wrap">
   <h1>🚀 鉄棒 着地チャレンジ V3 宇宙開発版</h1>
   <div class="gsel">
-    <button class="gbtn on" data-g="earth">🌏 地球<small>標準重力 / D×1.0</small></button>
+    <button class="gbtn on" data-g="earth">🌏 地球<small>標準重力 / D×2.2</small></button>
     <button class="gbtn" data-g="moon">🌙 月<small>重力1/6 滞空天国 / D×0.6</small></button>
-    <button class="gbtn" data-g="jupiter">🪐 木星<small>重力2.5倍 地獄 / D×1.5</small></button>
+    <button class="gbtn" data-g="jupiter">🪐 木星<small>重力2.5倍 地獄 / D×3.5</small></button>
   </div>
   <div class="cards">
     <div class="card"><div class="lbl">D得点(難度)</div><div class="val" id="dscore">-</div></div>
@@ -61,12 +61,13 @@ const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
 const btn=document.getElementById('btn'),judge=document.getElementById('judge');
 const dEl=document.getElementById('dscore'),eEl=document.getElementById('escore'),tEl=document.getElementById('total'),bestEl=document.getElementById('best');
 const W=672,H=380,barX=170,barY=110,armL=48,groundY=330;
-const GRAV={earth:{g:0.26,dMul:1.0,name:'地球'},moon:{g:0.045,dMul:0.6,name:'月'},jupiter:{g:0.65,dMul:1.5,name:'木星'}};
+const GRAV={earth:{g:0.26,dMul:2.2,name:'地球'},moon:{g:0.045,dMul:0.6,name:'月'},jupiter:{g:0.65,dMul:3.5,name:'木星'}};
+const STAMINA_LIM=100*Math.PI*2; // 腹筋の限界:累計100回転で回転が鈍る(実質、月専用の制限)
 let gMode='earth';
 let mode='idle',ang=0,angV=0,px=0,py=0,vx=0,vy=0,rot=0,rotV=0,rotStart=0,braced=false,best=0;
 let dust=[],flips=0,dS=0,eS=0,tot=0,shake=0,cam={y:0,s:1},stars=[],trail=[];
 const MAT_L=200,MAT_R=530,ROOF_Y=-130;
-let roofBroken=false,holeX=0,debris=[],matMiss=false;
+let roofBroken=false,holeX=0,debris=[],matMiss=false,staminaOut=false;
 const fg='#e8e6e0',mut='#8a8f98',accent='#f0997b',teal='#5dcaa5',mat='#3a4a5a';
 for(let i=0;i<80;i++)stars.push({x:Math.random()*W,y:-Math.random()*4000-300,r:Math.random()*1.6+0.4});
 
@@ -78,7 +79,7 @@ document.querySelectorAll('.gbtn').forEach(b=>b.addEventListener('click',()=>{
 
 function reset(){
   mode='swing';ang=0.2;angV=0.05;rot=0;braced=false;dust=[];shake=0;cam={y:0,s:1};trail=[];
-  roofBroken=false;debris=[];matMiss=false;
+  roofBroken=false;debris=[];matMiss=false;staminaOut=false;
   judge.textContent='──';dEl.textContent='-';eEl.textContent='-';tEl.textContent='-';
   btn.textContent='離手!(スペース可)';
 }
@@ -177,6 +178,7 @@ function land(){
     '背中から大地に挨拶。地球「痛いのはこっちや」',
     '着地というより墜落。ブラックボックス回収班、出動や'
   ]);
+  if(staminaOut)msg+='(100回転で腹筋が営業終了しとったで)';
   if(!braced&&!matMiss)msg+='(踏ん張り忘れ -2.0)';
   if(roofBroken)msg+='(天井修理費 ▲0.5)';
   if(gMode==='moon'&&eS>=9.5)msg+=' ※月やけどな';
@@ -200,6 +202,7 @@ function step(){
       roofBroken=true;holeX=px;shake=10;
       for(let i=0;i<12;i++)debris.push({x:px+(Math.random()-0.5)*50,y:ROOF_Y,vx:(Math.random()-0.5)*4,vy:Math.random()*2+1,r:Math.random()*5+2,rot:Math.random()*6,l:1});
     }
+    if(!braced&&Math.abs(rot-rotStart)>STAMINA_LIM){staminaOut=true;rotV*=0.96;}
     if(braced&&nearGround){
       const target=Math.round(rot/(Math.PI*2))*(Math.PI*2);
       rot+=(target-rot)*0.12+rotV*ts;rotV*=0.92;
@@ -368,6 +371,7 @@ function draw(){
     ctx.fillStyle=accent;
     ctx.fillText('高度: '+altM+'m '+zone,20,52);
     if(roofBroken){ctx.fillStyle='#e8b04a';ctx.font='600 13px sans-serif';ctx.fillText('🏚 天井突破(修理費 ▲0.5)',20,74);}
+    if(staminaOut){ctx.fillStyle='#e24b4a';ctx.font='600 13px sans-serif';ctx.fillText('💪 腹筋の限界!回転が鈍っとる!',20,roofBroken?96:74);}
     if(vy>0&&(groundY-py)<150&&!braced){
       ctx.fillStyle='#e24b4a';ctx.font='600 18px sans-serif';
       ctx.fillText('⏱ 今や!踏ん張れ!!',W/2-80,40);

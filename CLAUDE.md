@@ -7,6 +7,7 @@
 - 単一ファイル構成。`index.html` にHTML・CSS・JavaScriptをすべて含む。ビルド・依存関係・フレームワークなし。
 - GitHub Pagesで公開中: https://makenico.github.io/tetsubo-game-iphone/
 - 対象環境はiPhone Safari。タッチ操作（touchstart即反応、`touch-action:manipulation`、`user-select:none`）を壊さないこと。PCはスペースキー・クリックでも操作可。
+- localStorageの使用は可（GitHub Pages公開済みのため解禁）。ベストスコア等の記録永続化に使う。
 
 ## 運用ルール
 
