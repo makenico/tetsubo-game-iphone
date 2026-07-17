@@ -76,6 +76,82 @@ let mode='idle',ang=0,angV=0,px=0,py=0,vx=0,vy=0,rot=0,rotV=0,rotStart=0,braced=
 let dust=[],flips=0,dS=0,eS=0,tot=0,shake=0,cam={y:0,s:1},stars=[],trail=[];
 let twists=0,twistAnim=0,swipeActive=false,swipeX=0,lastWaza=null;
 const TWIST_FRAMES=18,TWIST_MAX=5; // ひねりは5回まで(首の限界)
+let confetti=[],cheer=0,frameN=0,lastTier='',tierStreak=0;
+const CONF_COLORS=['#f0997b','#5dcaa5','#e8b04a','#5d8ac9','#b85d8a','#f5f3ee'];
+const CROWD_COLORS=['#c9a34e','#5d8ac9','#b85d8a','#6db07a','#c96b4e','#8a7ac9'];
+
+// ===== 効果音(Web Audio 自前生成・外部ファイルなし) =====
+let AC=null;
+function ensureAudio(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){return;}}
+  if(AC&&AC.state==='suspended')AC.resume(); // iOS: ユーザー操作内でresumeが必要
+}
+function noiseBuf(dur){
+  const b=AC.createBuffer(1,Math.floor(AC.sampleRate*dur),AC.sampleRate),d=b.getChannelData(0);
+  for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+  return b;
+}
+function sfxWhoosh(){ // 離手のヒュッ
+  if(!AC)return;const t=AC.currentTime;
+  const src=AC.createBufferSource();src.buffer=noiseBuf(0.35);
+  const bp=AC.createBiquadFilter();bp.type='bandpass';bp.Q.value=2.5;
+  bp.frequency.setValueAtTime(500,t);bp.frequency.exponentialRampToValueAtTime(2400,t+0.25);
+  const g=AC.createGain();
+  g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.45,t+0.06);g.gain.exponentialRampToValueAtTime(0.0001,t+0.33);
+  src.connect(bp);bp.connect(g);g.connect(AC.destination);src.start(t);
+}
+function sfxTwist(){ // ひねりのシュッ
+  if(!AC)return;const t=AC.currentTime;
+  const src=AC.createBufferSource();src.buffer=noiseBuf(0.12);
+  const bp=AC.createBiquadFilter();bp.type='bandpass';bp.Q.value=3;
+  bp.frequency.setValueAtTime(1800,t);bp.frequency.exponentialRampToValueAtTime(3600,t+0.1);
+  const g=AC.createGain();
+  g.gain.setValueAtTime(0.0001,t);g.gain.exponentialRampToValueAtTime(0.25,t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+0.11);
+  src.connect(bp);bp.connect(g);g.connect(AC.destination);src.start(t);
+}
+function sfxCrash(){ // 天井破壊ガシャーン
+  if(!AC)return;const t=AC.currentTime;
+  const src=AC.createBufferSource();src.buffer=noiseBuf(0.5);
+  const lp=AC.createBiquadFilter();lp.type='lowpass';
+  lp.frequency.setValueAtTime(4000,t);lp.frequency.exponentialRampToValueAtTime(250,t+0.45);
+  const g=AC.createGain();
+  g.gain.setValueAtTime(0.6,t);g.gain.exponentialRampToValueAtTime(0.0001,t+0.5);
+  src.connect(lp);lp.connect(g);g.connect(AC.destination);src.start(t);
+  const o=AC.createOscillator();o.type='square';
+  o.frequency.setValueAtTime(90,t);o.frequency.exponentialRampToValueAtTime(35,t+0.3);
+  const g2=AC.createGain();g2.gain.setValueAtTime(0.35,t);g2.gain.exponentialRampToValueAtTime(0.0001,t+0.35);
+  o.connect(g2);g2.connect(AC.destination);o.start(t);o.stop(t+0.4);
+}
+function sfxLand(clean){ // 着地: ピタならタン!、崩れたらドスン
+  if(!AC)return;const t=AC.currentTime;
+  const src=AC.createBufferSource();src.buffer=noiseBuf(clean?0.06:0.18);
+  const g=AC.createGain();
+  g.gain.setValueAtTime(clean?0.5:0.55,t);g.gain.exponentialRampToValueAtTime(0.0001,t+(clean?0.07:0.2));
+  src.connect(g);g.connect(AC.destination);src.start(t);
+  const o=AC.createOscillator();o.type='sine';
+  o.frequency.setValueAtTime(clean?180:100,t);o.frequency.exponentialRampToValueAtTime(clean?80:40,t+0.12);
+  const g2=AC.createGain();g2.gain.setValueAtTime(0.4,t);g2.gain.exponentialRampToValueAtTime(0.0001,t+0.14);
+  o.connect(g2);g2.connect(AC.destination);o.start(t);o.stop(t+0.16);
+}
+function sfxFanfare(){ // 満点ファンファーレ
+  if(!AC)return;const t=AC.currentTime;
+  const notes=[[523.25,0,0.14],[659.25,0.13,0.14],[783.99,0.26,0.14],[1046.5,0.39,0.5],[783.99,0.39,0.5]];
+  notes.forEach(n=>{
+    const o=AC.createOscillator();o.type='square';o.frequency.value=n[0];
+    const g=AC.createGain();
+    g.gain.setValueAtTime(0.0001,t+n[1]);g.gain.exponentialRampToValueAtTime(0.18,t+n[1]+0.02);
+    g.gain.setValueAtTime(0.18,t+n[1]+n[2]-0.05);g.gain.exponentialRampToValueAtTime(0.0001,t+n[1]+n[2]);
+    o.connect(g);g.connect(AC.destination);o.start(t+n[1]);o.stop(t+n[1]+n[2]+0.02);
+  });
+}
+function spawnConfetti(){
+  for(let i=0;i<90;i++)confetti.push({
+    x:px+(Math.random()-0.5)*500,y:-60-Math.random()*220,
+    vx:(Math.random()-0.5)*1.6,vy:1+Math.random()*2.2,
+    rot:Math.random()*6.3,rotV:(Math.random()-0.5)*0.3,
+    c:CONF_COLORS[i%6],w:5+Math.random()*4,h:3+Math.random()*3,l:1
+  });
+}
 const MAT_L=200,MAT_R=530,ROOF_Y=-130;
 let roofBroken=false,holeX=0,debris=[],matMiss=false,staminaOut=false;
 const fg='#e8e6e0',mut='#8a8f98',accent='#f0997b',teal='#5dcaa5',mat='#3a4a5a';
@@ -111,6 +187,7 @@ function reset(){
   mode='swing';ang=0.2;angV=0.05;rot=0;braced=false;dust=[];shake=0;cam={y:0,s:1};trail=[];
   roofBroken=false;debris=[];matMiss=false;staminaOut=false;
   twists=0;twistAnim=0;swipeActive=false;lastWaza=null;
+  confetti=[];cheer=0;
   judge.textContent='──';dEl.textContent='-';eEl.textContent='-';tEl.textContent='-';
   shareRow.style.display='none';
   btn.textContent='離手!(スペース可)';
@@ -124,11 +201,13 @@ function release(){
   if(vy>-2.5)vy=-2.5;
   rot=ang;rotStart=rot;rotV=0.14+Math.abs(angV)*2.6;
   mode='air';btn.textContent='着地の踏ん張り!';
+  sfxWhoosh();
 }
 function brace(){if(mode==='air'&&!braced){braced=true;rotV*=0.5;}}
 function twist(){
   if(mode!=='air'||braced||twists>=TWIST_MAX||twistAnim>0)return;
   twists++;twistAnim=TWIST_FRAMES;
+  ensureAudio();sfxTwist();
 }
 // 宙返り数×ひねり数 → 技名(Gコード風の難度表記つき)
 function wazaName(f,t){
@@ -163,6 +242,8 @@ function land(){
   eS=Math.round(eS*10)/10;
   tot=dS+eS-(roofBroken?0.5:0);
   tot=Math.round(tot*10)/10;
+  sfxLand(eS>=7);
+  if(eS>=9.5&&!matMiss){sfxFanfare();spawnConfetti();cheer=240;}
   dEl.textContent=dS.toFixed(1);eEl.textContent=eS.toFixed(1);tEl.textContent=tot.toFixed(1);
   const fTxt=flips>=1?flips+'回宙':'飛び降り';
   const gN=GRAV[gMode].name;
@@ -230,6 +311,21 @@ function land(){
     '背中から大地に挨拶。地球「痛いのはこっちや」',
     '着地というより墜落。ブラックボックス回収班、出動や'
   ]);
+  // 連続同ティア検知(3回以上同じ結果で特殊セリフに差し替え)
+  const tier=matMiss?'out':eS>=9.5?'perfect':eS>=8.5?'hop':eS>=7?'step':eS>=5?'wobble':eS>=2.5?'butt':'crash';
+  if(tier===lastTier)tierStreak++;else{tierStreak=1;lastTier=tier;}
+  if(tierStreak>=3){
+    const streakMsg={
+      out:[tierStreak+'回連続場外。体育館の外に住民票移しとくか?','また場外かい。もう主催者が保険入り直したわ','場外'+tierStreak+'連発。マット「俺、避けられとる?」て泣いとるで'],
+      perfect:[tierStreak+'連続ピタ。もう審判いらんやん。俺の存在意義どこや','また満点かい。採点表がハンコになってもうたわ','ピタ'+tierStreak+'連発。会場が「知ってた」みたいな空気なっとるで'],
+      hop:['3連続小ホップ。あと靴半分がそんなに遠いか','惜しいの'+tierStreak+'連発。「惜しい大賞」ならぶっちぎり優勝や','またホップ。カンガルーの血、入っとる?'],
+      step:['3連続一歩。ここ散歩コースちゃうぞ','また一歩歩いたな。もう歩き癖ついとるやん。競歩に転向するか?','一歩'+tierStreak+'連発。着地後の寄り道、有料にすんぞ'],
+      wobble:['3連続グラグラ。洗濯機の気持ち、だいぶわかってきたやろ','またグラグラ。気象庁から「揺れの原因判明」て発表出たで','グラグラ'+tierStreak+'回目。観客がもう船酔いしとる'],
+      butt:['3連続尻もちて。もうマットと友達やん。ダチ超えて夫婦や','尻もち'+tierStreak+'連発。マット「指定席、温めといたで」','また尻もち。ここ椅子ちゃう言うてるやろ!マットが座布団に転職考えとるわ'],
+      crash:['3連続墜落。国際救助隊、もう常駐しとるで','墜落'+tierStreak+'回目。地面「そろそろ俺が謝りたい」','毎回背中から来るな。マットがトラウマなって夜しか眠れんらしいわ']
+    };
+    msg=pick(streakMsg[tier])+(matMiss?'(場外 -4.0)':'');
+  }
   if(staminaOut)msg+='(100回転で腹筋が営業終了しとったで)';
   if(!braced&&!matMiss)msg+='(踏ん張り忘れ -2.0)';
   if(roofBroken)msg+='(天井修理費 ▲0.5)';
@@ -263,6 +359,7 @@ function step(){
     if(!roofBroken&&vy<0&&py<ROOF_Y){
       roofBroken=true;holeX=px;shake=10;
       for(let i=0;i<12;i++)debris.push({x:px+(Math.random()-0.5)*50,y:ROOF_Y,vx:(Math.random()-0.5)*4,vy:Math.random()*2+1,r:Math.random()*5+2,rot:Math.random()*6,l:1});
+      sfxCrash();
     }
     if(!braced&&Math.abs(rot-rotStart)>STAMINA_LIM){staminaOut=true;rotV*=0.96;}
     if(braced&&nearGround){
@@ -285,6 +382,13 @@ function step(){
   cam.s+=(targetS-cam.s)*0.06;
   dust.forEach(d=>{d.x+=d.vx;d.y+=d.vy;d.vy+=0.1;d.l-=0.03;});
   dust=dust.filter(d=>d.l>0);
+  confetti.forEach(c=>{
+    c.x+=c.vx+Math.sin(frameN*0.1+c.rot)*0.6;c.y+=c.vy;c.rot+=c.rotV;
+    if(c.y>groundY-3){c.y=groundY-3;c.vy=0;c.vx=0;c.rotV=0;c.l-=0.02;}
+  });
+  confetti=confetti.filter(c=>c.l>0);
+  if(cheer>0)cheer--;
+  frameN++;
   if(shake>0)shake*=0.85;
   draw();requestAnimationFrame(step);
 }
@@ -363,11 +467,22 @@ function draw(){
   ctx.fillText('第99回 西日本鉄棒王決定戦',352,ROOF_Y+57);
   ctx.fillStyle=mut;ctx.font='11px sans-serif';
   ctx.fillText('🚭 館内禁煙・場外飛行禁止',352,ROOF_Y+86);
-  // 観客席(左側)
+  // 観客席(左側)。満点時は立ち上がって腕を振る
   for(let r2=0;r2<3;r2++)for(let c2=0;c2<6;c2++){
-    ctx.fillStyle=['#c9a34e','#5d8ac9','#b85d8a','#6db07a','#c96b4e','#8a7ac9'][(r2*6+c2)%6];
-    ctx.beginPath();ctx.arc(-160+c2*34,groundY-30-r2*34,8,0,Math.PI*2);ctx.fill();
-    ctx.fillStyle='#3a3f4c';ctx.fillRect(-168+c2*34,groundY-22-r2*34,16,14);
+    const i2=r2*6+c2;
+    const lift=cheer>0?4+Math.abs(Math.sin(frameN*0.22+i2))*7:0;
+    const hx2=-160+c2*34,hy2=groundY-30-r2*34-lift;
+    if(cheer>0){ // 振り上げた腕
+      const sw=Math.sin(frameN*0.3+i2);
+      ctx.strokeStyle='#e8b48a';ctx.lineWidth=2.5;ctx.lineCap='round';
+      ctx.beginPath();
+      ctx.moveTo(hx2-6,hy2+6);ctx.lineTo(hx2-11,hy2-6-sw*4);
+      ctx.moveTo(hx2+6,hy2+6);ctx.lineTo(hx2+11,hy2-6+sw*4);
+      ctx.stroke();
+    }
+    ctx.fillStyle=CROWD_COLORS[i2%6];
+    ctx.beginPath();ctx.arc(hx2,hy2,8,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#3a3f4c';ctx.fillRect(hx2-8,hy2+8,16,14);
   }
   // 天井の梁(穴が開いてたら2分割)
   ctx.fillStyle='#454b5a';
@@ -390,6 +505,14 @@ function draw(){
   // 破片
   ctx.fillStyle='#454b5a';
   debris.forEach(d=>{ctx.save();ctx.translate(d.x,d.y);ctx.rotate(d.rot);ctx.fillRect(-d.r,-d.r/2,d.r*2,d.r);ctx.restore();});
+  // 紙吹雪(満点時)
+  confetti.forEach(c=>{
+    ctx.save();ctx.globalAlpha=Math.max(0,c.l);
+    ctx.translate(c.x,c.y);ctx.rotate(c.rot);
+    ctx.fillStyle=c.c;ctx.fillRect(-c.w/2,-c.h/2,c.w,c.h);
+    ctx.restore();
+  });
+  ctx.globalAlpha=1;
   // ===== 器具 =====
   ctx.strokeStyle=mut;ctx.lineWidth=3;
   ctx.beginPath();ctx.moveTo(barX-70,groundY);ctx.lineTo(barX-55,barY);ctx.moveTo(barX+70,groundY);ctx.lineTo(barX+55,barY);ctx.stroke();
@@ -455,6 +578,7 @@ function draw(){
   }
 }
 function act(){
+  ensureAudio();
   if(mode==='idle'||mode==='done')reset();
   else if(mode==='swing')release();
   else if(mode==='air')brace();
